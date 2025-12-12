@@ -1,282 +1,461 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+type PhaserNamespace = typeof import('phaser');
+import { AppState } from '@/lib/types';
+import { ASSETS, PowerUpType } from '@/lib/constants';
 
-interface GameCanvasProps {
-    onGameOver: (score: number) => void;
+interface Props {
+  setAppState: React.Dispatch<React.SetStateAction<AppState>>;
+  updateScore: (score: number) => void;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ onGameOver }) => {
-    const gameContainerRef = useRef<HTMLDivElement>(null);
-    const gameRef = useRef<any>(null);
+type PhaserGameInstance = InstanceType<PhaserNamespace['Game']>;
 
-    useEffect(() => {
-        let Phaser: any;
+const GameCanvas: React.FC<Props> = ({ setAppState, updateScore }) => {
+  const gameRef = useRef<PhaserGameInstance | null>(null);
+  const [score, setScore] = useState(0);
+  const [activePowerUps, setActivePowerUps] = useState<Map<PowerUpType, number>>(new Map());
 
-        // Dynamic import for browser-only
-        import('phaser').then((phaserModule) => {
-            Phaser = phaserModule;
+  useEffect(() => {
+    if (gameRef.current) return;
+    let cancelled = false;
+    let Phaser: PhaserNamespace;
 
-            if (!gameContainerRef.current) return;
-            if (gameRef.current) return;
+    const startGame = async () => {
+      const phaserModule = await import('phaser');
+      Phaser = phaserModule as PhaserNamespace;
+      if (cancelled) return;
 
-            // --- CONFIGURATION ---
-            const ASSET_SIZE = {
-                PLAYER: '32px',
-                GIFT: '24px',
-                HAZARD: '24px',
-                POWERUP: '28px',
-            };
+      class MainScene extends Phaser.Scene {
+        private player!: Phaser.GameObjects.Text;
+        private hazards!: Phaser.Physics.Arcade.Group;
+        private risingFlames!: Phaser.Physics.Arcade.Group;
+        private powerUps!: Phaser.Physics.Arcade.Group;
+        private scoreTimer!: Phaser.Time.TimerEvent;
+        private spawnTimer!: Phaser.Time.TimerEvent;
+        private flameSpawnTimer?: Phaser.Time.TimerEvent;
+        private powerUpSpawnTimer!: Phaser.Time.TimerEvent;
+        private currentScore = 0;
+        private isGameOver = false;
+        private isInvincible = false;
+        private difficultyLevel = 1;
+        private activePowerUps: Map<PowerUpType, number> = new Map();
+        private scoreMultiplier = 1;
+        private baseTimeScale = 1;
 
-            const EMOJIS = {
-                PLAYER: '🎅',
-                GIFT: '🎁',
-                HAZARD: '🔥',
-                POWERUP: '❄️',
-            };
+        declare add: Phaser.GameObjects.GameObjectFactory;
+        declare physics: Phaser.Physics.Arcade.ArcadePhysics;
+        declare input: Phaser.Input.InputPlugin;
+        declare time: Phaser.Time.Clock;
+        declare tweens: Phaser.Tweens.TweenManager;
+        declare cameras: Phaser.Cameras.Scene2D.CameraManager;
+        declare scale: Phaser.Scale.ScaleManager;
+        declare game: Phaser.Game;
 
-            const INITIAL_SPEED = 250;
-            const SPAWN_RATES = {
-                GIFT: 250,
-                HAZARD: 600,
-                POWERUP: 8000,
-            };
+        constructor() {
+          super({ key: 'MainScene' });
+        }
 
-            // --- STATE VARIABLES ---
-            let player: any;
-            let giftsGroup: any;
-            let hazardsGroup: any;
-            let powerupsGroup: any;
+        create() {
+          this.currentScore = 0;
+          this.isGameOver = false;
+          this.difficultyLevel = 1;
+          this.scoreMultiplier = 1;
+          this.baseTimeScale = 1;
+          this.activePowerUps.clear();
 
-            let scoreText: any;
-            let powerupText: any;
+          this.player = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            ASSETS.PLAYER,
+            { fontSize: '60px' }
+          );
+          this.player.setOrigin(0.5);
 
-            let score = 0;
-            let gameBaseSpeed = INITIAL_SPEED;
-            let isGameOver = false;
+          this.physics.add.existing(this.player);
+          const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
+          playerBody.setCircle(30);
+          playerBody.setCollideWorldBounds(true);
 
-            let scoreMultiplier = 1;
-            let isInvincible = false;
-            let timeScale = 1.0;
+          this.hazards = this.physics.add.group();
+          this.risingFlames = this.physics.add.group();
+          this.powerUps = this.physics.add.group();
 
-            let spawnTimers: any[] = [];
+          this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+            if (this.isGameOver) return;
+            this.player.x = pointer.x;
+            this.player.y = pointer.y;
+          });
 
-            // --- PHASER CONFIG ---
-            const config: Phaser.Types.Core.GameConfig = {
-                type: Phaser.AUTO,
-                parent: gameContainerRef.current,
-                width: window.innerWidth,
-                height: window.innerHeight,
-                transparent: true,
-                physics: {
-                    default: 'arcade',
-                    arcade: { gravity: { x: 0, y: 0 }, debug: false },
-                },
-                scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
-                scene: { create, update },
-            };
+          this.scoreTimer = this.time.addEvent({
+            delay: 100,
+            callback: this.incrementScore,
+            callbackScope: this,
+            loop: true
+          });
 
-            // --- GAME LOGIC ---
-            function resetPowerups() {
-                scoreMultiplier = 1;
-                isInvincible = false;
-                timeScale = 1.0;
-                if (player) player.clearTint();
+          this.spawnTimer = this.time.addEvent({
+            delay: 500,
+            callback: this.spawnHazard,
+            callbackScope: this,
+            loop: true
+          });
+
+          this.powerUpSpawnTimer = this.time.addEvent({
+            delay: 7000,
+            callback: this.spawnPowerUp,
+            callbackScope: this,
+            loop: true
+          });
+
+          this.physics.add.overlap(
+            this.player,
+            this.hazards,
+            (player, hazard) => this.hitHazard(player, hazard),
+            undefined,
+            this
+          );
+
+          this.physics.add.overlap(
+            this.player,
+            this.risingFlames,
+            (player, flame) => this.hitHazard(player, flame),
+            undefined,
+            this
+          );
+
+          this.physics.add.overlap(
+            this.player,
+            this.powerUps,
+            (player, powerUp) => this.collectPowerUp(player, powerUp),
+            undefined,
+            this
+          );
+        }
+
+        update(time: number) {
+          this.hazards.children.each((child) => {
+            const hazard = child as Phaser.GameObjects.Text;
+            if (hazard.active && hazard.y > this.scale.height + 50) {
+              hazard.destroy();
+            }
+            return true;
+          });
+
+          this.risingFlames.children.each((child) => {
+            const flame = child as Phaser.GameObjects.Text;
+            if (flame.active && flame.y < -50) {
+              flame.destroy();
+            }
+            return true;
+          });
+
+          this.powerUps.children.each((child) => {
+            const powerUp = child as Phaser.GameObjects.Text;
+            if (powerUp.active && powerUp.y > this.scale.height + 50) {
+              powerUp.destroy();
+            }
+            return true;
+          });
+
+          this.updatePowerUpStates(time);
+        }
+
+        incrementScore() {
+          if (this.isGameOver) return;
+          this.currentScore += this.scoreMultiplier;
+          this.game.events.emit('scoreUpdate', this.currentScore);
+
+          if (this.currentScore % 100 === 0) {
+            this.increaseDifficulty();
+          }
+
+          if (this.currentScore >= 700 && !this.flameSpawnTimer) {
+            this.startRisingFlames();
+          }
+        }
+
+        increaseDifficulty() {
+          this.difficultyLevel++;
+          this.spawnTimer.remove();
+          const newDelay = Math.max(150, 500 - (this.difficultyLevel * 40));
+          this.spawnTimer = this.time.addEvent({
+            delay: newDelay,
+            callback: this.spawnHazard,
+            callbackScope: this,
+            loop: true
+          });
+        }
+
+        spawnHazard() {
+          if (this.isGameOver) return;
+
+          const x = Phaser.Math.Between(20, this.scale.width - 20);
+          const hazard = this.add.text(x, -50, ASSETS.FIRE, { fontSize: '25px' });
+          hazard.setOrigin(0.5);
+
+          this.physics.add.existing(hazard);
+          this.hazards.add(hazard);
+
+          const body = hazard.body as Phaser.Physics.Arcade.Body;
+          const baseSpeed = 300;
+          const speedVar = Phaser.Math.Between(0, 100);
+          body.setVelocityY(baseSpeed + (this.difficultyLevel * 50) + speedVar);
+        }
+
+        startRisingFlames() {
+          this.flameSpawnTimer = this.time.addEvent({
+            delay: 2000,
+            callback: this.spawnRisingFlames,
+            callbackScope: this,
+            loop: true
+          });
+        }
+
+        spawnRisingFlames() {
+          if (this.isGameOver) return;
+
+          let flameCount = 1;
+          if (this.currentScore >= 1500) {
+            flameCount = Phaser.Math.Between(1, 5);
+          } else if (this.currentScore >= 1000) {
+            flameCount = Phaser.Math.Between(1, 4);
+          } else {
+            flameCount = Phaser.Math.Between(1, 2);
+          }
+
+          for (let i = 0; i < flameCount; i++) {
+            const x = Phaser.Math.Between(20, this.scale.width - 20);
+            const flame = this.add.text(x, this.scale.height + 50, ASSETS.FLAME, { fontSize: '25px' });
+            flame.setOrigin(0.5);
+
+            this.physics.add.existing(flame);
+            this.risingFlames.add(flame);
+
+            const body = flame.body as Phaser.Physics.Arcade.Body;
+            const baseSpeed = -250;
+            const speedVar = Phaser.Math.Between(-50, 50);
+            body.setVelocityY(baseSpeed + speedVar);
+          }
+        }
+
+        spawnPowerUp() {
+          if (this.isGameOver) return;
+
+          const powerUpTypes = [PowerUpType.DOUBLE_SCORE, PowerUpType.INVISIBLE, PowerUpType.SLOW_MOTION];
+          const selectedType = Phaser.Utils.Array.GetRandom(powerUpTypes);
+
+          let emoji = ASSETS.POWERUP_2X;
+          if (selectedType === PowerUpType.INVISIBLE) {
+            emoji = ASSETS.POWERUP_INVISIBLE;
+          } else if (selectedType === PowerUpType.SLOW_MOTION) {
+            emoji = ASSETS.POWERUP_SLOWMO;
+          }
+
+          const x = Phaser.Math.Between(50, this.scale.width - 50);
+          const powerUp = this.add.text(x, -50, emoji, { fontSize: '30px' });
+          powerUp.setOrigin(0.5);
+          powerUp.setData('powerUpType', selectedType);
+
+          this.physics.add.existing(powerUp);
+          this.powerUps.add(powerUp);
+
+          const body = powerUp.body as Phaser.Physics.Arcade.Body;
+          body.setVelocityY(200);
+        }
+
+        collectPowerUp(playerObj: any, powerUpObj: any) {
+          const powerUp = powerUpObj as Phaser.GameObjects.Text;
+          const powerUpType = powerUp.getData('powerUpType') as PowerUpType;
+          powerUp.destroy();
+
+          const endTime = this.time.now + 10000;
+          this.activePowerUps.set(powerUpType, endTime);
+
+          if (powerUpType === PowerUpType.DOUBLE_SCORE) {
+            this.scoreMultiplier = 2;
+          } else if (powerUpType === PowerUpType.INVISIBLE) {
+            this.isInvincible = true;
+            this.player.setAlpha(0.4);
+          } else if (powerUpType === PowerUpType.SLOW_MOTION) {
+            this.physics.world.timeScale = 2;
+          }
+
+          this.game.events.emit('powerUpActivated', powerUpType, 10);
+        }
+
+        updatePowerUpStates(currentTime: number) {
+          const expiredPowerUps: PowerUpType[] = [];
+
+          this.activePowerUps.forEach((endTime, powerUpType) => {
+            if (currentTime >= endTime) {
+              expiredPowerUps.push(powerUpType);
+            } else {
+              const remainingTime = Math.ceil((endTime - currentTime) / 1000);
+              this.game.events.emit('powerUpUpdate', powerUpType, remainingTime);
+            }
+          });
+
+          expiredPowerUps.forEach(powerUpType => {
+            this.activePowerUps.delete(powerUpType);
+
+            if (powerUpType === PowerUpType.DOUBLE_SCORE) {
+              this.scoreMultiplier = 1;
+            } else if (powerUpType === PowerUpType.INVISIBLE) {
+              this.isInvincible = false;
+              this.player.setAlpha(1);
+            } else if (powerUpType === PowerUpType.SLOW_MOTION) {
+              this.physics.world.timeScale = 1;
             }
 
-            function spawnGift(this: any) {
-                if (isGameOver) return;
-                const { width } = this.scale;
-                const x = Phaser.Math.Between(20, width - 20);
-                const item = this.add.text(x, -30, EMOJIS.GIFT, { fontSize: ASSET_SIZE.GIFT }).setOrigin(0.5);
-                giftsGroup.add(item);
-                item.body.setVelocityY(gameBaseSpeed * timeScale);
-            }
+            this.game.events.emit('powerUpExpired', powerUpType);
+          });
+        }
 
-            function spawnHazard(this: any) {
-                if (isGameOver) return;
-                const { width, height } = this.scale;
-                const x = Phaser.Math.Between(20, width - 20);
-                const fromBottom = Math.random() > 0.5;
+        hitHazard(playerObj: any, hazardObj: any) {
+          const hazard = hazardObj as Phaser.GameObjects.Text;
+          const player = playerObj as Phaser.GameObjects.Text;
 
-                const startY = fromBottom ? height + 30 : -30;
-                const velocityY = fromBottom ? -(gameBaseSpeed * timeScale) : gameBaseSpeed * timeScale;
+          if (this.isInvincible) {
+            return;
+          }
 
-                const item = this.add.text(x, startY, EMOJIS.HAZARD, { fontSize: ASSET_SIZE.HAZARD }).setOrigin(0.5);
-                hazardsGroup.add(item);
-                item.body.setVelocityY(velocityY);
-                item.body.setCircle(10, 2, 2);
-            }
+          if (this.isGameOver) return;
+          this.isGameOver = true;
 
-            function spawnPowerup(this: any) {
-                if (isGameOver) return;
-                const { width } = this.scale;
-                const x = Phaser.Math.Between(30, width - 30);
+          this.cameras.main.shake(500, 0.05);
+          player.setTint(0xff0000);
+          this.physics.pause();
+          this.scoreTimer.remove();
+          this.spawnTimer.remove();
+          if (this.flameSpawnTimer) {
+            this.flameSpawnTimer.remove();
+          }
+          this.powerUpSpawnTimer.remove();
 
-                const item = this.add.text(x, -30, EMOJIS.POWERUP, { fontSize: ASSET_SIZE.POWERUP }).setOrigin(0.5);
-                const type = Phaser.Math.RND.pick(['2X', 'SHIELD', 'SLOW']);
-                item.setData('type', type);
+          this.time.delayedCall(1000, () => {
+            this.game.events.emit('gameOver', this.currentScore);
+          });
+        }
+      }
 
-                powerupsGroup.add(item);
-                item.body.setVelocityY((gameBaseSpeed * 0.8) * timeScale);
+      const config: Phaser.Types.Core.GameConfig = {
+        type: Phaser.AUTO,
+        parent: 'phaser-game',
+        width: window.innerWidth,
+        height: window.innerHeight,
+        transparent: true,
+        physics: {
+          default: 'arcade',
+          arcade: {
+            gravity: { x: 0, y: 0 },
+            debug: false
+          }
+        },
+        scene: MainScene,
+        scale: {
+          mode: Phaser.Scale.RESIZE,
+          autoCenter: Phaser.Scale.CENTER_BOTH
+        }
+      };
 
-                this.tweens.add({ targets: item, angle: 360, duration: 2000, repeat: -1 });
-            }
+      const game = new Phaser.Game(config);
+      gameRef.current = game;
 
-            function collectGift(this: any, _: any, giftObj: any) {
-                giftObj.destroy();
-                score += 1 * scoreMultiplier;
-                scoreText.setText(score.toString());
-                if (gameBaseSpeed < 600) gameBaseSpeed += 2;
-            }
+      game.events.on('scoreUpdate', (newScore: number) => {
+        setScore(newScore);
+      });
 
-            function updateVelocities(factor: number) {
-                [giftsGroup, hazardsGroup, powerupsGroup].forEach((group) => {
-                    group.children.iterate((child: any) => {
-                        if (child?.body) child.body.velocity.y *= factor;
-                        return true;
-                    });
-                });
-            }
+      game.events.on('gameOver', (finalScore: number) => {
+        updateScore(finalScore);
+        setAppState(AppState.GAME_OVER);
+      });
 
-            function collectPowerup(this: any, playerObj: any, powerupObj: any) {
-                const type = powerupObj.getData('type');
-                powerupObj.destroy();
-                resetPowerups();
-
-                let label = '';
-                switch (type) {
-                    case '2X':
-                        scoreMultiplier = 2;
-                        label = '2X POINTS!';
-                        playerObj.setTint(0xfbbf24);
-                        break;
-                    case 'SHIELD':
-                        isInvincible = true;
-                        label = 'SHIELD!';
-                        playerObj.setTint(0x3b82f6);
-                        break;
-                    case 'SLOW':
-                        timeScale = 0.5;
-                        label = 'TIME FREEZE!';
-                        playerObj.setTint(0xa855f7);
-                        updateVelocities(0.5);
-                        break;
-                }
-
-                powerupText.setText(label);
-                powerupText.setAlpha(1);
-                this.tweens.add({
-                    targets: powerupText,
-                    alpha: 0,
-                    y: 50,
-                    duration: 1000,
-                    delay: 500,
-                    onComplete: () => (powerupText.y = 80),
-                });
-
-                this.time.delayedCall(5000, () => {
-                    if (!isGameOver) {
-                        if (type === 'SLOW') updateVelocities(2);
-                        resetPowerups();
-                    }
-                });
-            }
-
-            function hitHazard(this: any, playerObj: any, hazardObj: any) {
-                if (isInvincible) {
-                    hazardObj.destroy();
-                    this.tweens.add({ targets: playerObj, alpha: 0.2, duration: 50, yoyo: true, repeat: 3 });
-                    return;
-                }
-                if (isGameOver) return;
-
-                isGameOver = true;
-                this.cameras.main.shake(500, 0.05);
-                playerObj.setTint(0xff0000);
-                this.physics.pause();
-                spawnTimers.forEach((t) => t.destroy());
-
-                setTimeout(() => onGameOver(score), 1000);
-            }
-
-            function create(this: any) {
-                const { width, height } = this.scale;
-                isGameOver = false;
-                score = 0;
-                gameBaseSpeed = INITIAL_SPEED;
-                resetPowerups();
-
-                // Player
-                player = this.add.text(width / 2, height / 2, EMOJIS.PLAYER, { fontSize: ASSET_SIZE.PLAYER }).setOrigin(0.5);
-                this.physics.add.existing(player);
-                const playerBody = player.body;
-                playerBody.setCollideWorldBounds(true);
-                playerBody.setCircle(12, 4, 4);
-
-                // Groups
-                giftsGroup = this.physics.add.group();
-                hazardsGroup = this.physics.add.group();
-                powerupsGroup = this.physics.add.group();
-
-                // UI
-                scoreText = this.add.text(20, 20, '0', { fontSize: '40px', fontFamily: '"Mountains of Christmas", cursive', color: '#fff', stroke: '#000', strokeThickness: 4 });
-                powerupText = this.add.text(width / 2, 80, '', { fontSize: '24px', fontFamily: '"Outfit", sans-serif', color: '#fbbf24', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setAlpha(0);
-
-                // Input
-                this.input.on('pointermove', (pointer: any) => {
-                    if (isGameOver) return;
-                    this.physics.moveToObject(player, pointer, 800);
-                });
-
-                this.events.on('update', () => {
-                    if (isGameOver || !this.input.activePointer) return;
-                    const pointer = this.input.activePointer;
-                    const distance = Phaser.Math.Distance.Between(player.x, player.y, pointer.x, pointer.y);
-                    if (distance < 10) player.body.reset(player.x, player.y);
-                });
-
-                // Spawners
-                spawnTimers.push(this.time.addEvent({ delay: SPAWN_RATES.GIFT, callback: spawnGift, callbackScope: this, loop: true }));
-                spawnTimers.push(this.time.addEvent({ delay: SPAWN_RATES.HAZARD, callback: spawnHazard, callbackScope: this, loop: true }));
-                spawnTimers.push(this.time.addEvent({ delay: SPAWN_RATES.POWERUP, callback: spawnPowerup, callbackScope: this, loop: true }));
-
-                // Collisions
-                this.physics.add.overlap(player, giftsGroup, collectGift, undefined, this);
-                this.physics.add.overlap(player, hazardsGroup, hitHazard, undefined, this);
-                this.physics.add.overlap(player, powerupsGroup, collectPowerup, undefined, this);
-            }
-
-            function update(this: any) {
-                const { height } = this.scale;
-                [giftsGroup, hazardsGroup, powerupsGroup].forEach((group) => {
-                    group.children.iterate((child: any) => {
-                        if (!child) return true;
-                        if (child.body.velocity.y > 0 && child.y > height + 50) child.destroy();
-                        else if (child.body.velocity.y < 0 && child.y < -50) child.destroy();
-                        return true;
-                    });
-                });
-            }
-
-            // Initialize Phaser Game
-            gameRef.current = new Phaser.Game(config);
+      game.events.on('powerUpActivated', (powerUpType: PowerUpType, duration: number) => {
+        setActivePowerUps(prev => {
+          const newMap = new Map(prev);
+          newMap.set(powerUpType, duration);
+          return newMap;
         });
+      });
 
-        // Cleanup
-        return () => {
-            if (gameRef.current) {
-                gameRef.current.destroy(true);
-                gameRef.current = null;
-            }
-        };
-    }, [onGameOver]);
+      game.events.on('powerUpUpdate', (powerUpType: PowerUpType, remainingTime: number) => {
+        setActivePowerUps(prev => {
+          const newMap = new Map(prev);
+          newMap.set(powerUpType, remainingTime);
+          return newMap;
+        });
+      });
 
-    return (
-        <div className="relative w-full h-full overflow-hidden bg-transparent touch-none">
-            <div ref={gameContainerRef} className="absolute inset-0 w-full h-full" />
+      game.events.on('powerUpExpired', (powerUpType: PowerUpType) => {
+        setActivePowerUps(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(powerUpType);
+          return newMap;
+        });
+      });
+    };
+
+    startGame();
+
+    return () => {
+      cancelled = true;
+      if (gameRef.current) {
+        gameRef.current.destroy(true);
+        gameRef.current = null;
+      }
+    };
+  }, [setAppState, updateScore]);
+
+  const getPowerUpDisplay = (type: PowerUpType) => {
+    switch (type) {
+      case PowerUpType.DOUBLE_SCORE:
+        return { emoji: '🎁', label: '2x Score', color: 'bg-yellow-500/90' };
+      case PowerUpType.INVISIBLE:
+        return { emoji: '👻', label: 'Invisible', color: 'bg-purple-500/90' };
+      case PowerUpType.SLOW_MOTION:
+        return { emoji: '⏰', label: 'Slow-Mo', color: 'bg-blue-500/90' };
+    }
+  };
+
+  return (
+    <div className="relative w-full h-full overflow-hidden cursor-crosshair">
+      <div id="phaser-game" className="absolute inset-0 z-0 touch-none" />
+
+      <div className="absolute top-4 left-4 z-10 flex flex-wrap items-start gap-3 pointer-events-none">
+        <div className="bg-white/90 backdrop-blur-md border border-slate-200 rounded-2xl px-6 py-3 shadow-lg">
+          <span className="text-slate-500 text-xs font-bold uppercase tracking-wider block">Score</span>
+          <span className="text-4xl font-black text-slate-800 font-mono">{score}</span>
         </div>
-    );
+
+        {Array.from(activePowerUps.entries()).map(([type, remainingTime]) => {
+          const display = getPowerUpDisplay(type);
+          if (!display) return null;
+          return (
+            <div
+              key={type}
+              className={`${display.color} backdrop-blur-md rounded-xl px-4 py-2 shadow-md flex items-center gap-2`}
+            >
+              <span className="text-2xl">{display.emoji}</span>
+              <div className="flex flex-col">
+                <span className="text-white text-xs font-bold uppercase tracking-wider">
+                  {display.label}
+                </span>
+                <span className="text-white/90 text-xs font-mono">
+                  {remainingTime}s
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="absolute bottom-6 w-full text-center text-slate-400 text-sm pointer-events-none opacity-50 font-medium">
+        Drag anywhere to fly
+      </div>
+    </div>
+  );
 };
 
 export default GameCanvas;
