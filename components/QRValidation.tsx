@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, QrCode } from 'lucide-react';
 import { AppState } from '@/lib/types';
-import { createClient } from '@/utils/supabaseClient';
+import { createClient, isSupabaseConfigError } from '@/utils/supabaseClient';
 
 interface Props {
   setAppState: React.Dispatch<React.SetStateAction<AppState>>;
@@ -73,7 +73,14 @@ const QRValidation: React.FC<Props> = ({ setAppState, qrToken }) => {
         setStatus('valid');
         setTimeout(() => setAppState(AppState.REGISTRATION), 1500);
       } catch (err) {
-        console.error('Error validating token:', err);
+        if (isSupabaseConfigError(err)) {
+          // Configuration error - don't log to console in production, just show invalid
+          if (process.env.NODE_ENV === 'development') {
+            console.error('Supabase configuration error:', err.message);
+          }
+        } else {
+          console.error('Error validating token:', err);
+        }
         setStatus('invalid');
       }
     };
