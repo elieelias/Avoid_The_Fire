@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Medal, Trophy } from 'lucide-react';
 import { AppState, LeaderboardEntry, Player } from '@/lib/types';
-import { createClient } from '@/utils/supabaseClient';
 
 interface Props {
   player: Player;
@@ -31,19 +30,23 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
     }
 
     try {
-      const { error } = await createClient()
-        .from('main')
-        .update({
-          is_used: true,
+      const response = await fetch('/api/save-score', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          qr_token: player.qr_token,
           player_name: player.name,
           phone_number: player.phone,
           score: player.score,
-          played_at: new Date().toISOString()
-        })
-        .eq('qr_token', player.qr_token);
+        }),
+      });
 
-      if (error) {
-        console.error('Error saving score:', error);
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        console.error('Error saving score:', result.error);
       }
     } catch (err) {
       console.error('Error saving score:', err);
@@ -55,25 +58,14 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
     setBoardError(null);
 
     try {
-      const client = createClient();
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 1);
+      const response = await fetch('/api/leaderboard');
 
-      const { data, error } = await client
-        .from('main')
-        .select('player_name, score, played_at')
-        .gte('played_at', start.toISOString())
-        .lt('played_at', end.toISOString())
-        .order('score', { ascending: false })
-        .limit(50);
-
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        throw new Error('Failed to fetch leaderboard');
       }
 
-      const rows: LeaderboardRow[] = data ?? [];
+      const result = await response.json();
+      const rows: LeaderboardRow[] = result.data ?? [];
 
       let entries: LeaderboardEntry[] = rows
         .filter((row) => row.score !== null)
@@ -105,7 +97,7 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
       setLeaderboard(entries);
     } catch (err) {
       console.error('Error loading leaderboard:', err);
-      setBoardError('Unable to load today’s leaderboard.');
+      setBoardError("Unable to load today's leaderboard.");
       setLeaderboard([
         {
           rank: 1,
@@ -160,9 +152,8 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
 
         {/* Festival Leaderboard (sticky and expandable) */}
         <div
-          className={`sticky top-0 transition-all duration-300 ${
-            isBoardExpanded ? 'z-30 h-[90dvh] shadow-2xl bg-white' : 'z-0 bg-white/95 backdrop-blur'
-          } border-b border-slate-100`}
+          className={`sticky top-0 transition-all duration-300 ${isBoardExpanded ? 'z-30 h-[90dvh] shadow-2xl bg-white' : 'z-0 bg-white/95 backdrop-blur'
+            } border-b border-slate-100`}
         >
           <div className="p-6 pb-4 flex items-center justify-center gap-2">
             <div className="h-[1px] bg-slate-300 w-12"></div>

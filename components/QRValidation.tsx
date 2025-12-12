@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, QrCode } from 'lucide-react';
 import { AppState } from '@/lib/types';
-import { createClient, isSupabaseConfigError } from '@/utils/supabaseClient';
 
 interface Props {
   setAppState: React.Dispatch<React.SetStateAction<AppState>>;
@@ -15,56 +14,39 @@ const QRValidation: React.FC<Props> = ({ setAppState, qrToken }) => {
 
   useEffect(() => {
     const validateToken = async () => {
-        let extractedToken = qrToken;
-    
-    // Check if it's a full URL
-    if (qrToken && qrToken.startsWith('http')) {
-      try {
-        const url = new URL(qrToken);
-        extractedToken = url.searchParams.get('token');
-      } catch (err) {
-        console.error('Invalid URL:', err);
-        setStatus('invalid');
-        return;
+      let extractedToken = qrToken;
+
+      // Check if it's a full URL
+      if (qrToken && qrToken.startsWith('http')) {
+        try {
+          const url = new URL(qrToken);
+          extractedToken = url.searchParams.get('token');
+        } catch (err) {
+          console.error('Invalid URL:', err);
+          setStatus('invalid');
+          return;
+        }
       }
-    }
-    
-    // Now use extractedToken instead of qrToken
-    if (!extractedToken) {
-      setStatus('invalid');
-      return;
-    }
-      // If no token provided, show error
-      if (!qrToken) {
+
+      // Now use extractedToken instead of qrToken
+      if (!extractedToken) {
         setStatus('invalid');
         return;
       }
 
       try {
-        // Query the database to check if the token exists and is not used
-        const { data, error } = await createClient()
-          .from('main')
-          .select('*')
-          .eq('qr_token', qrToken)
-          .single();
+        // Call the API route to validate the token
+        const response = await fetch('/api/validate-token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ token: extractedToken }),
+        });
 
-        if (error || !data) {
-          // Token not found
-          setStatus('invalid');
-          return;
-        }
+        const result = await response.json();
 
-        // Check if token is already used
-        if (data.is_used) {
-          setStatus('invalid');
-          return;
-        }
-
-        // Check if token is still valid (not expired)
-        const validTill = new Date(data.valid_till);
-        const now = new Date();
-
-        if (now > validTill) {
+        if (!response.ok || !result.valid) {
           setStatus('invalid');
           return;
         }
@@ -73,14 +55,7 @@ const QRValidation: React.FC<Props> = ({ setAppState, qrToken }) => {
         setStatus('valid');
         setTimeout(() => setAppState(AppState.REGISTRATION), 1500);
       } catch (err) {
-        if (isSupabaseConfigError(err)) {
-          // Configuration error - don't log to console in production, just show invalid
-          if (process.env.NODE_ENV === 'development') {
-            console.error('Supabase configuration error:', err.message);
-          }
-        } else {
-          console.error('Error validating token:', err);
-        }
+        console.error('Error validating token:', err);
         setStatus('invalid');
       }
     };
