@@ -1,25 +1,28 @@
 export enum AppState {
-    SCAN_VALIDATION = 'SCAN_VALIDATION',
+    VALIDATING_QR = 'VALIDATING_QR',
+    INVALID_QR = 'INVALID_QR',
     REGISTRATION = 'REGISTRATION',
     TUTORIAL = 'TUTORIAL',
-    GAME = 'GAME',
-    GAME_OVER = 'GAME_OVER'
-}
-
-export interface PlayerProfile {
+    PLAYING = 'PLAYING',
+    GAME_OVER = 'GAME_OVER',
+  }
+  
+  export interface Player {
     name: string;
     phone: string;
-}
-
-export interface LeaderboardEntry {
+    score: number;
+    session_id?: string;
+    qr_token?: string;
+  }
+  
+  export interface LeaderboardEntry {
     rank: number;
     name: string;
     score: number;
     isCurrentUser?: boolean;
-}
-
-export interface GameConfig {
-    initialSpeed: number;
+  }
+  
+  export interface GameConfig {
+    speed: number;
     spawnRate: number;
-    speedIncrement: number;
-}
+  }
