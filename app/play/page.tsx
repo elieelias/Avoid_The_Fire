@@ -19,7 +19,14 @@ export default function Play() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     setQrToken(token);
-  }, []);
+  }, [])
+
+   // Preload Phaser module to avoid delay when starting game
+    import('phaser').then(() => {
+      console.log('Phaser module preloaded');
+    }).catch(err => {
+      console.error('Failed to preload Phaser:', err);
+    });
 
   const handleUpdateScore = (score: number) => {
     if (player) {
