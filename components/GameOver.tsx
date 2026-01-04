@@ -146,7 +146,7 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
 
         <div className="p-6">
           <p className="text-xs text-center text-slate-400">
-            Winner announced on Day 6. Good luck!
+
           </p>
         </div>
 

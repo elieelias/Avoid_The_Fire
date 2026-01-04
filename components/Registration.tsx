@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Play } from 'lucide-react';
+import { Play, Trophy } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { AppState, Player } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 
@@ -12,21 +13,17 @@ interface Props {
 }
 
 const Registration: React.FC<Props> = ({ setAppState, setPlayer, qrToken }) => {
+  const router = useRouter();
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [errors, setErrors] = useState<{ name?: string, phone?: string }>({});
+  const [error, setError] = useState<string>('');
 
   const handleStart = () => {
-    const newErrors: { name?: string, phone?: string } = {};
-    if (!name.trim()) newErrors.name = "Name is required";
-    if (!phone.trim()) newErrors.phone = "Phone is required";
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (!name.trim()) {
+      setError("Name is required");
       return;
     }
 
-    setPlayer({ name, phone, score: 0, qr_token: qrToken || undefined });
+    setPlayer({ name, phone: '', score: 0, qr_token: qrToken || undefined });
     setAppState(AppState.TUTORIAL);
   };
 
@@ -52,9 +49,9 @@ const Registration: React.FC<Props> = ({ setAppState, setPlayer, qrToken }) => {
         </div>
 
         <h1 className="text-3xl font-bold text-slate-900 text-center mb-2">
-          Join the Festival<br /><span className="text-green-600">Leaderboard!</span>
+          Welcome to<br /><span className="text-green-600">Fruishy's Christmas Game</span>
         </h1>
-        <p className="text-slate-500 text-center mb-8">Enter your details to compete for the grand prize.</p>
+        <p className="text-slate-500 text-center mb-8">Enjoy our Christmas game for free until next season!</p>
 
         <div className="w-full space-y-4">
           <div>
@@ -62,26 +59,16 @@ const Registration: React.FC<Props> = ({ setAppState, setPlayer, qrToken }) => {
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={`w-full px-4 py-3 rounded-xl border ${errors.name ? 'border-red-500 bg-red-50' : 'border-slate-300 focus:border-green-500 focus:ring-2 focus:ring-green-200'} outline-none transition-all`}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (error) setError('');
+              }}
+              className={`w-full px-4 py-3 rounded-xl border ${error ? 'border-red-500 bg-red-50' : 'border-slate-300 focus:border-green-500 focus:ring-2 focus:ring-green-200'} outline-none transition-all`}
               placeholder="Santa Claus"
               autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleStart()}
             />
-            {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Mobile Number</label>
-            <input
-              type="tel"
-              pattern="[0-9]*"
-              inputMode="numeric"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className={`w-full px-4 py-3 rounded-xl border ${errors.phone ? 'border-red-500 bg-red-50' : 'border-slate-300 focus:border-green-500 focus:ring-2 focus:ring-green-200'} outline-none transition-all`}
-              placeholder="080 1234 5678"
-            />
-            {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
+            {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
           </div>
         </div>
       </div>
@@ -95,6 +82,16 @@ const Registration: React.FC<Props> = ({ setAppState, setPlayer, qrToken }) => {
         >
           Start Game <Play size={20} fill="currentColor" />
         </Button>
+
+        <Button
+          variant="outline"
+          fullWidth
+          onClick={() => router.push('/leaderboard')}
+          className="text-lg py-4"
+        >
+          Leaderboard <Trophy size={20} className="text-yellow-500" />
+        </Button>
+
         <p className="text-xs text-center text-slate-400">
           Made with ❤️ by the Fruishy Team
         </p>

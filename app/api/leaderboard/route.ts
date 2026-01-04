@@ -5,17 +5,9 @@ export async function GET(request: NextRequest) {
     try {
         const supabase = getServerClient();
 
-        // Get today's start and end times
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
-        end.setDate(end.getDate() + 1);
-
         const { data, error } = await supabase
             .from('main')
             .select('player_name, score, played_at')
-            .gte('played_at', start.toISOString())
-            .lt('played_at', end.toISOString())
             .order('score', { ascending: false })
             .limit(50);
 
