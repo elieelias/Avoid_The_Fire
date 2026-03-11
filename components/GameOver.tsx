@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Medal, Trophy } from 'lucide-react';
+import { Home, Medal, Trophy } from 'lucide-react';
 import { AppState, LeaderboardEntry, Player } from '@/lib/types';
+import { Button } from './ui/button';
 
 interface Props {
   player: Player;
@@ -22,12 +23,11 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
   const [boardError, setBoardError] = useState<string | null>(null);
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hasSavedRef = useRef(false);
 
   const saveScore = useCallback(async () => {
-    if (!player.qr_token) {
-      console.warn('No QR token found for player');
-      return;
-    }
+    if (hasSavedRef.current) return;
+    hasSavedRef.current = true;
 
     try {
       const response = await fetch('/api/save-score', {
@@ -36,9 +36,9 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          qr_token: player.qr_token,
+          qr_token: player.qr_token || null,
           player_name: player.name,
-          phone_number: player.phone,
+          phone_number: player.phone || '',
           score: player.score,
         }),
       });
@@ -226,6 +226,14 @@ const GameOver: React.FC<Props> = ({ player, setAppState: _setAppState, setPlaye
       </div>
 
       <div className="bg-white p-4 border-t border-slate-100 z-10">
+        <Button
+          variant="outline"
+          fullWidth
+          onClick={() => _setAppState(AppState.REGISTRATION)}
+          className="text-lg py-4"
+        >
+          <Home size={20} className="mr-2" /> Home
+        </Button>
         <p className="text-xs text-center text-slate-400">
           Made with ❤️ by the Fruishy Team
         </p>

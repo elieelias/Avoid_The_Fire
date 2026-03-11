@@ -86,7 +86,7 @@ const Registration: React.FC<Props> = ({ setAppState, setPlayer, qrToken }) => {
         <Button
           variant="outline"
           fullWidth
-          onClick={() => router.push('/leaderboard')}
+          onClick={() => setAppState(AppState.LEADERBOARD)}
           className="text-lg py-4"
         >
           Leaderboard <Trophy size={20} className="text-yellow-500" />

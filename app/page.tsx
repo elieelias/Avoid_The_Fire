@@ -7,6 +7,7 @@ import Registration from '@/components/Registration';
 import Tutorial from '@/components/Tutorial';
 import GameCanvas from '@/components/GameCanvas';
 import GameOver from '@/components/GameOver';
+import Leaderboard from '@/components/Leaderboard';
 import { AppState, Player } from '@/lib/types';
 
 export default function Play() {
@@ -53,6 +54,15 @@ export default function Play() {
           <GameCanvas
             setAppState={setAppState}
             updateScore={handleUpdateScore}
+          />
+        );
+
+      case AppState.LEADERBOARD:
+        return (
+          <Leaderboard
+            player={player}
+            setAppState={setAppState}
+            setPlayer={setPlayer}
           />
         );
 

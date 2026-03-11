@@ -13,8 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fruishy Christmas Game",
-  description: "Holiday QR challenge with Phaser mini-game and Supabase scoring.",
+  title: "Avoid The Fire!",
 };
 
 export default function RootLayout({

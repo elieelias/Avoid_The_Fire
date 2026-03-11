@@ -5,29 +5,39 @@ export async function POST(request: NextRequest) {
     try {
         const { qr_token, player_name, phone_number, score } = await request.json();
 
-        if (!qr_token) {
-            return NextResponse.json(
-                { error: 'QR token is required' },
-                { status: 400 }
-            );
-        }
-
         const supabase = getServerClient();
 
-        // Update the record with the score and mark as used
-        const { error } = await supabase
-            .from('main')
-            .update({
-                is_used: true,
-                player_name,
-                phone_number,
-                score,
-                played_at: new Date().toISOString()
-            })
-            .eq('qr_token', qr_token);
+        let dbError;
 
-        if (error) {
-            console.error('Error saving score:', error);
+        if (qr_token) {
+            // Update the record with the score and mark as used
+            const { error } = await supabase
+                .from('main')
+                .update({
+                    is_used: true,
+                    player_name,
+                    phone_number: phone_number || '',
+                    score,
+                    played_at: new Date().toISOString()
+                })
+                .eq('qr_token', qr_token);
+            dbError = error;
+        } else {
+            // Insert a new record
+            const { error } = await supabase
+                .from('main')
+                .insert([{
+                    is_used: true,
+                    player_name,
+                    phone_number: phone_number || '',
+                    score,
+                    played_at: new Date().toISOString()
+                }]);
+            dbError = error;
+        }
+
+        if (dbError) {
+            console.error('Error saving score:', dbError);
             return NextResponse.json(
                 { error: 'Failed to save score' },
                 { status: 500 }
